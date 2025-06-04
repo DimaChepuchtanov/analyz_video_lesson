@@ -1,5 +1,4 @@
 import uvicorn
-import os
 from fastapi import FastAPI
 from API.routers.user import user
 from API.routers.company import company
