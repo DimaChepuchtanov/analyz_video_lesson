@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from API.database.user import DataBaseUser
 from cryptography.fernet import Fernet
 from API.server.setting import setting
+from re import match
 
 
 class MiddleLoyerUser:
@@ -19,13 +20,18 @@ class MiddleLoyerUser:
         fernet = Fernet(setting.SECRET_KEY)
         return fernet.decrypt(string).decode()
 
-    async def create_user(self, db: AsyncSession, user: SchemaUser) -> bool:
+    async def create_user(self, db: AsyncSession, user: SchemaUser, token: str) -> bool:
 
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+        email = bool(match(email_pattern, user.login))
+        if not email:
+            return {"status": False, "exception": "InvalidLogin"}
         password = await self.__encrypt(user.password)
         user.password = password.decode()
 
-        result = await self.database.create_user(db=db, user=user)
-        return True
+        result = await self.database.create_user(db=db, user=user, token=token)
+        return result
 
     async def delete_user(self, db: AsyncSession, uid: int) -> dict:
         return await self.database.delete_user(db, uid)
@@ -35,9 +41,9 @@ class MiddleLoyerUser:
         if password_db == "UserNotFoud":
             return {"status_code": 404, 'text': password_db}
 
-        decript_password = await self.__decrypt(password_db.password)
+        decript_password = await self.__decrypt(password_db[1])
         if decript_password == user.password:
-            return {"status_code": 200, 'text': password_db.id}
+            return {"status_code": 200, 'text': password_db[0]}
         else:
             return {"status_code": 400, 'text': "Пароль не верный"}
 

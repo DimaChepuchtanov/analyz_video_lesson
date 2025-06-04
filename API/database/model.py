@@ -32,9 +32,10 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, default='Not name', index=True)
     company = Column(Integer, ForeignKey('company.id'))
+    t_name = Column(Integer, ForeignKey('token.id'))
     role = Column(Integer, ForeignKey('roles.id'))
     login = Column(String, unique=True)
-    password = Column(String) 
+    password = Column(String)
 
 
 class FileStorage(Base):
@@ -44,6 +45,14 @@ class FileStorage(Base):
     duration = Column(String, default='00:00:00')
     size = Column(String, default='0 bytes')
     text_data = Column(String)
+
+
+class Token(Base):
+    __tablename__ = "token"
+    id = Column(Integer, primary_key=True, index=True)
+    t_name = Column(String)
+    t_lvl = Column(String, default='super')
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Lessons(Base):

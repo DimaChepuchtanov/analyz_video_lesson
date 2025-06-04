@@ -39,8 +39,13 @@ class DataBaseLessons:
 
         return {"status": True, "exception": None, "code": 200}
 
-    async def get_lessons(self, db: AsyncSession) -> list:
-        roles = await db.execute(select(Lessons))
+    async def get_lessons(self, db: AsyncSession, filter: str) -> list:
+        statem = select(Lessons)
+        if filter == "all":
+            roles = await db.execute(statem)
+        elif filter == "top":
+            statem = statem.order_by(Lessons.id.desc()).limit(5)
+            roles = await db.execute(statem)
         return roles.scalars().all()
 
     async def get_lesson(self, db: AsyncSession, id: int) -> Lessons:

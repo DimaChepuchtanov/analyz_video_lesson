@@ -10,6 +10,8 @@ from API.database.lessons import DataBaseLessons
 from API.server.lessons import MiddleLoyeLesson
 from API.database.file import DataBaseFile
 from API.server.file import MiddleLoyerFile
+from API.database.token import DataBaseToken
+from API.server.token import MiddleLoyerToken
 
 
 user_logic = MiddleLoyerUser(DataBaseUser())
@@ -18,3 +20,4 @@ license_logic = MiddleLoyerLicences(DataBaseLicences())
 role_logic = MiddleLoyerRole(DataBaseRole())
 lesson_logic = MiddleLoyeLesson(DataBaseLessons())
 file_logic = MiddleLoyerFile(DataBaseFile())
+token_logic = MiddleLoyerToken(DataBaseToken())

@@ -10,20 +10,38 @@ class MiddleLoyeLesson:
     def __init__(self, database: DataBaseLessons):
         self.database = database
         self.text = """Ты - аналитик данных. Перед тобой данные, полученные из разных источников: видео и аудио.
-                       Каждый источник имеет стартовую позицию - время, которое отделено от остальных данных через ;
+                       Каждый источник имеет стартовую позицию - время, которое отделено от остальных данных через \n
                        Тебе нужно соспоставить время для аудио данных и видео данных и оценить качество проведенного занятия
                        основываясь на вовлеченности пользователей и их эмоции.
 
-                       Видео поток обозначается тегом Video и данные начинаются со следующего символа. Также и с тегом Audio.
+                       Видео поток обозначается тегом Video и описывает данные по выявляенным пользователям, пользователь, процент взгляда на экран, эмоция.
+                       Аудио поток обозначается тегом Audio и описывает текст, который говорит спикер. Спикер - это преподаватель, его вовлеченность оценивать не нужно.
                        В данных может быть фраза FaceNotFound или AudioNotFound это означает, что за данный промежуток времени
                        небыло найдено данных и тебе необходимо выставлять оценку основываясь только на известных данных.
-                       Если за  нет ни аудио данных ни видео данных, ты должен сказать слово 'No'
 
                        Видео поток имеет структуру: время;пользователь;процент взгляда на экран;эмоция
                        Аудио поток имеет структуру: время;пользователь;сообщение;эмоция
 
                        Результат должен быть в формате одного единственного целого числа - оценка вовлеченности без пояснения!
-                       При наличии данных, необходимо выставить оценку"""
+                       Расчет выполнять нужно последовательно
+                       При наличии данных, необходимо выставить оценку по 100 бальной шкале"""
+        self.statistic = """Ты - аналитик данных. Перед тобой данные, полученные из разных источников: видео и аудио.
+                            Каждый источник имеет стартовую позицию - время, которое отделено от остальных данных через \n
+                            Тебе нужно соспоставить время для аудио данных и видео данных и оценить качество проведенного занятия
+                            основываясь на вовлеченности пользователей и их эмоции.
+
+                            Видео поток обозначается тегом Video и описывает данные по выявляенным пользователям, пользователь, процент взгляда на экран, эмоция.
+                            Аудио поток обозначается тегом Audio и описывает текст, который говорит спикер. Спикер - это преподаватель, его вовлеченность оценивать не нужно.
+                            В данных может быть фраза FaceNotFound или AudioNotFound это означает, что за данный промежуток времени
+                            небыло найдено данных и тебе необходимо выставлять оценку основываясь только на известных данных.
+
+                            Видео поток имеет структуру: время;пользователь;процент взгляда на экран;эмоция
+                            Аудио поток имеет структуру: время;пользователь;сообщение;эмоция
+
+                            Напиши по каждому пользователю краткую характеристику для каждого временного промежутка и максиамльно сжато, в одно предложение.
+                            Шаблон содержимого:
+                            Время (курсив)
+                            Имя - статистика"""
         self.client = Client("Qwen/Qwen2.5-72B-Instruct")
 
     async def __gettime(self, time: datetime) -> str:
@@ -31,7 +49,7 @@ class MiddleLoyeLesson:
         time = time.split('.')[0]
         end_ = datetime.strptime(time, "%H:%M:%S")
         end_time = datetime.strftime(end_, "%H:%M:%S")
-        start_time = datetime.strftime(end_ - timedelta(minutes=1), "%H:%M:%S")  # Запись 1 минута
+        start_time = datetime.strftime(end_ - timedelta(minutes=30), "%H:%M:%S")  # Запись 30 секунд
         return f'{start_time}--{end_time}'
 
     async def new_lesson(self, db: AsyncSession, lesson: SchemaLesson) -> dict:
@@ -48,8 +66,10 @@ class MiddleLoyeLesson:
     async def update_mark(self, db: AsyncSession, lesson: SchemaLessonUpdate) -> dict:
         return await self.database.update_lesson(db, lesson)
 
-    async def all_lesson(self, db: AsyncSession) -> list:
-        return await self.database.get_lessons(db)
+    async def all_lesson(self, db: AsyncSession, filter: str) -> list:
+        result = await self.database.get_lessons(db, filter)
+        result = [[x.name, x.mark, 'Просмотреть'] for x in result]
+        return result
 
     async def current_lesson(self, db: AsyncSession, id: int) -> dict:
         return await self.database.get_lesson(db, id)
@@ -61,56 +81,6 @@ class MiddleLoyeLesson:
         return await self.database.delete_analyz(db, id)
 
     async def update_data_analyz(self, db: AsyncSession, analyz: SchemaAnalyzUpdate) -> dict:
-
-        #  Приведение данных к формату анализа
-        #  inputVideo=>time ; user in format i start ziro ; eyes position ; emotion or FaceNotFound
-        #  video=>datetime;user;eyes;emotion
-
-        #  inputAudio=>time ; user in format i start ziro ; message ; emotion or AudioNotFound
-        #  audio=>datetime;user;message;emotion
-
-        if analyz.audio is not None:
-            temp_data = ''
-            for i in analyz.audio.split('\n')[:-1]:
-                list_audio_data = i.split(' ; ')
-
-                time = await self.__gettime(list_audio_data[0])
-
-                if 'AudioNotFound' in i:
-                    temp_data += f'{time};AudioNotFound'
-                    continue
-
-                user = list_audio_data[1] + 1
-                message = list_audio_data[2]
-                try:
-                    emotion = list_audio_data[3]['dominant_emotion']
-                except:
-                    emotion = "Не определена"
-
-                temp_data += f'{time};{user};{message};{emotion}\n'
-            analyz.audio = temp_data
-
-        if analyz.video is not None:
-            temp_data = ''
-            for i in analyz.video.split('\n')[:-1]:
-                list_video_data = i.split(' ; ')
-
-                time = await self.__gettime(list_video_data[0])
-
-                if 'FaceNotFound' in i:
-                    temp_data += f'{time};FaceNotFound'
-                    continue
-
-                user = int(list_video_data[1]) + 1
-                eyes = max(0, min(1, float(list_video_data[2]))) * 100
-                try:
-                    emotion = list_video_data[3]
-                except:
-                    emotion = "Не определена"
-
-                temp_data += f'{time};{user};{eyes};{emotion}\n'
-            analyz.video = temp_data
-
         result = DotMap(await self.database.update_analyz(db, analyz))
         return {"status_code": result.code, "exception": result.exception}
 
@@ -120,10 +90,26 @@ class MiddleLoyeLesson:
         video = data.video.split('\n')[1:]
         audio = data.audio.split('\n')[1:]
 
-        if len(video) > 0:
+        if len(video) == len(audio):
             result = self.client.predict(query=f"Video\n{video}\n\nAudio\n{audio}",
                                          history=[],
                                          system=self.text,
+                                         api_name="/model_chat")
+            try:
+                return result[1][0][1]
+            except Exception as e:
+                return result[1][0][1]
+
+    async def get_statistic(self, db: AsyncSession, id: int):
+        data = await self.database.get_analyz(db, id)
+
+        video = data.video.split('\n')[1:]
+        audio = data.audio.split('\n')[1:]
+
+        if len(video) == len(audio):
+            result = self.client.predict(query=f"Video\n{video}\n\nAudio\n{audio}",
+                                         history=[],
+                                         system=self.statistic,
                                          api_name="/model_chat")
             try:
                 return result[1][0][1]
