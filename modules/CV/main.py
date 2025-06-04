@@ -1,62 +1,79 @@
 import cv2
 import dlib
 from imutils import face_utils
-from deepface import DeepFace
-import pyautogui
-import numpy as np
-import os
-from datetime import timedelta
 import time
-import schedule
-from concurrent.futures import ThreadPoolExecutor
-import requests
+import os
+import numpy as np
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
 
 
-class Recoginze():
-    path: str = os.getcwd()
-    detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(f"{path}/modules/shape_predictor_68_face_landmarks.dat")
-
+class CV:
     def __init__(self):
-        self.data_from_video = ''
-        self.start_recognize = time.time()
-        self.mark = '100'
-        self.stop_thread = False
-        self.id = 0
-        self.lid = 0
-        self.temp_ = '100'
+        self.path = os.getcwd()
+        self.detector = dlib.get_frontal_face_detector()
+        self.predictor = dlib.shape_predictor(f"{self.path}/modules/shape_predictor_68_face_landmarks.dat")
+        self.state = True
+        self.driver = None
+        self.__data = ""
+        self._setup_browser()
 
-    def __timer(self) -> str:
-        return str(timedelta(seconds=time.time() - self.start_recognize))
+    def _setup_browser(self):
+        """Настройка Яндекс.Браузера через Selenium"""
+        options = Options()
 
-    def mark_value(self) -> str:
-        return self.temp_
+        # Путь к Яндекс.Браузеру
+        options.binary_location = r'C:\Users\79826\AppData\Local\Yandex\YandexBrowser\Application\browser.exe'
 
-    def analyz(self, text: str = None) -> str:
-        if text == '':
-            text = f'{self.__timer()} ; FaceNotFound'
-        upload = requests.patch(url='http://127.0.0.1:8000/analyz/', json={'id': self.id, 'lid': self.lid, "audio": f'{self.__timer()} ; AudioNotFound\n', "video": text})
-        mark = requests.get(url=f'http://127.0.0.1:8000/analyz/mark?id={str(self.id)}')
+        # Настройки для автоматизации
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-dev-shm-usage')
 
-        if mark.text != '"No"':
-            text = mark.text.removeprefix('"')
-            text = text.removesuffix('"')
-            self.mark = int(text)
-            self.temp_ = self.mark
-        else:
-            self.mark = self.temp_
+        service = Service(
+            executable_path=r'C:\Users\79826\Desktop\VKR\desktop\yandexdriver.exe'  # Укажите правильный путь
+        )
 
-    def change_state(self, state: bool = False) -> None:
-        self.stop_thread = state
+        self.driver = webdriver.Chrome(
+            service=service,    # Передаем service вместо executable_path
+            options=options
+        )
 
-    def get_analyz_data(self):
-        print("::Начинаем вычислять оценку::")
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(self.analyz, self.data_from_video)
-            self.mark = future.result()
-            print("::Оценка получена::")
-        print("::Обнуляем данные::")
-        self.data_from_video = ""
+    def get_data(self):
+        return self.__data
+
+    def get_image(self):
+        """Основной метод для захвата и анализа изображения"""
+        try:
+            self.driver.get('https://telemost.yandex.ru/j/30527821286466')
+            WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.TAG_NAME, 'video'))
+            )
+
+            while self.state:
+                self.process_page()
+                time.sleep(1)  # Пауза между итерациями
+
+        except Exception as e:
+            print(f"Ошибка браузера: {e}")
+        finally:
+            self.cleanup()
+
+    def process_page(self):
+        """Обработка элементов страницы"""
+        videos = self.driver.find_elements(By.TAG_NAME, 'video')
+        names = self.driver.find_elements(By.CSS_SELECTOR, 'span.TextName_BOaIg')
+
+        for video, name in zip(videos, names):
+            user = name.text
+            self.process_video(video, user)
+
+    def change_state(self, state: bool):
+        self.state = state
 
     def calculate_gaze_ratio(self, landmarks: np.ndarray, calibration_data: dict = None):
         # Инициализация калибровочных данных при первом вызове
@@ -71,7 +88,7 @@ class Recoginze():
         # Извлечение точек глаз
         left_eye = np.array([(landmarks[n][0], landmarks[n][1]) for n in range(36, 42)])
         right_eye = np.array([(landmarks[n][0], landmarks[n][1]) for n in range(42, 48)])
-        
+
         # Вычисление характеристик глаз
         def eye_features(eye_points):
             pupil = np.mean(eye_points[1:5], axis=0)  # Положение зрачка
@@ -116,30 +133,48 @@ class Recoginze():
 
         return gaze_ratio, calibration_data
 
-    def analyze_faces(self, gray, frame, faces):
-        for i, face in enumerate(faces):
-            landmarks = self.predictor(gray, face)
-            landmarks = face_utils.shape_to_np(landmarks)
+    def process_video(self, video, user):
+        """Обработка видео элемента"""
+        try:
+            # Получаем скриншот элемента
+            screenshot = video.screenshot_as_png
+            img = cv2.imdecode(
+                np.frombuffer(screenshot, np.uint8), 
+                cv2.IMREAD_COLOR
+            )
 
-            result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
+            # Анализ изображения
+            self.analyze_frame(img, user)
 
-            # # Определение направления взгляда
-            gaze_ratio = self.calculate_gaze_ratio(landmarks)[0]
+        except Exception as e:
+            print(f"Ошибка обработки видео: {e}")
 
-            self.data_from_video += f"{self.__timer()} ; {i} ; {gaze_ratio} ; Нейтрально\n"
+    def analyze_frame(self, frame, user):
+        """Анализ кадра"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.detector(gray)
 
-    def main(self):
-        schedule.every(60).seconds.do(self.get_analyz_data)
-        while self.stop_thread is not True:
-            schedule.run_pending()
+        if faces:
+            for face in faces:
+                landmarks = self.predictor(gray, face)
+                landmarks = face_utils.shape_to_np(landmarks)
+                gaze_ratio = self.calculate_gaze_ratio(landmarks)[0]
+                self.__data += f"{user} ; {gaze_ratio} ; Нейтрально || "
 
-            # Захват экрана
-            screen = pyautogui.screenshot()
-            frame = np.array(screen)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    def cleanup(self):
+        """Корректное завершение работы"""
+        if self.driver:
+            self.driver.quit()
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.detector(gray)
+    def stop(self):
+        """Остановка"""
+        self.state = False
+        self.cleanup()
 
-            if faces:
-                self.analyze_faces(gray, frame, faces)
+
+# if __name__ == "__main__":
+#     analyzer = CV()
+#     try:
+#         analyzer.get_image()
+#     except KeyboardInterrupt:
+#         analyzer.stop()

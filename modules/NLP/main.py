@@ -1,32 +1,33 @@
 import speech_recognition as sr
+from copy import deepcopy
 
 
-def stream_audio(recognizer: sr.Recognizer, microphone: sr.Microphone) -> None:
-    """Stream audio from the microphone and recognize it using speech_recognition."""
-    with microphone as source:
-            print("Listening for audio... (Press Ctrl+C to stop)")
+class NLP():
+    def __init__(self, state: bool | None = True):
+        self.state = state
+        self.recog = sr.Recognizer()
+        self.__data = ''
 
-            # Adjust for ambient noise and set a threshold
-            recognizer.adjust_for_ambient_noise(source)
+    def get_data(self) -> str:
+        data = deepcopy(self.__data)
+        self.__data = ''
+        return data
 
-            while True:
+    def change_state(self, state: bool) -> None:
+        self.state = state
+        return None
+
+    def main(self):
+        with sr.Microphone() as sourse:
+            while self.state is True:
                 try:
-                    # Listen for audio
-                    audio = recognizer.listen(source)
-
-                    # Recognize speech using Google Web Speech API
-                    text = recognizer.recognize_google(audio, language='ru-RU')
-                    print("Transcription: " + text)
-
-                except sr.UnknownValueError:
-                    # If the speech is unintelligible
-                    print("Sorry, I could not understand the audio.")
-                except sr.RequestError as e:
-                    # If there's an issue with the API
-                    print(f"Could not request results from Google Speech Recognition service; {e}")
+                    audio = self.recog.listen(source=sourse, timeout=1)
+                    text = self.recog.recognize_google(audio, language='ru-RU')
+                    self.__data += f"{text}\n"
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
-    recognize = sr.Recognizer()
-    microphone = sr.Microphone()
-    stream_audio(recognize, microphone)
+    nlp = NLP()
+    nlp.main()

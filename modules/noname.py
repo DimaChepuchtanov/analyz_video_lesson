@@ -4,7 +4,18 @@ import sys
 from threading import Thread, Event
 from PIL import Image, ImageTk
 from requests import post
-from config import read_data_config
+import sys, os
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
+from setting import setting
+import requests
+import schedule
+from datetime import timedelta
+import time
+from random import randint
+import asyncio
+
 
 GWL_EXSTYLE = -20
 WS_EX_APPWINDOW = 0x00040000
@@ -63,9 +74,11 @@ class Load(tk.Tk):
 
 
 class CustomWindow(tk.Tk):
-    def __init__(self, recog):
+    def __init__(self, cv, nlp):
         super().__init__()
 
+        self.mark = '100'
+        self.schedule_state = True
         # Удаление рамок и кнопок
         self.overrideredirect(True)
 
@@ -93,7 +106,8 @@ class CustomWindow(tk.Tk):
         tk.Button(self.content_frame, text="Стоп", bg='grey', fg='white', border=1, command=self.stop).pack(fill=tk.BOTH, expand=True)
         button_ = tk.Button(self.content_frame, text="Оценка", bg='grey', fg='white', border=1)
         button_.pack(fill=tk.BOTH, expand=True)
-        tk.Button(self.content_frame, text="Подробнее", bg='grey', fg='white', border=1).pack(fill=tk.BOTH, expand=True)
+        but = tk.Button(self.content_frame, text="Подробнее", bg='grey', fg='white', border=1)
+        but.pack(fill=tk.BOTH, expand=True)
         self.content_frame.pack(fill=tk.BOTH, expand=True)
 
         # Добавление функциональности перемещения окна
@@ -105,16 +119,26 @@ class CustomWindow(tk.Tk):
         button_.bind("<ButtonPress-1>", self.open_secondary_window)
         button_.bind("<ButtonRelease-1>", self.close_secondary_window)
 
+        but.bind("<ButtonPress-1>", self.open_long_window)
+        but.bind("<ButtonRelease-1>", self.close_long_window)
+
         self.x = self.y = 0
         self.after(10, lambda: self.set_appwindow())
 
         # Переменная для хранения ссылки на второе окно
         self.secondary_window = None
-        self.mark = "50"
+        self.secondar_window = None
         self.id_analyz, self.lesson_id = self.create_row()
-        self.recog = recog
-        self.recog.id = self.id_analyz
-        self.recog.lid = self.lesson_id
+        self.cv, self.nlp = cv, nlp
+        self.id = self.id_analyz
+        self.lid = self.lesson_id
+        self.statistic = """0:00:30
+Дима Чепуштанов - Взгляд на экран колеблется между отсутствием и полной концентрацией, эмоция нейтральная.
+0:01:00
+Дима Чепуштанов - Взгляд на экран часто фокусируется, но периодически отвлекается, эмоция нейтральная"""
+
+    def __timer(self) -> str:
+        return str(timedelta(seconds=time.time() - self.timer))
 
     def create_row(self) -> int:
         request_file = post(url='http://127.0.0.1:8000/file/', json={"path": "None",
@@ -129,7 +153,8 @@ class CustomWindow(tk.Tk):
         file_id = dict(eval(request_file.content))
         file_id = int(file_id['id'])
 
-        request_lesson = post(url='http://127.0.0.1:8000/lesson/', json={"uid": self.reload_user(),
+        uid = self.reload_user()
+        request_lesson = post(url='http://127.0.0.1:8000/lesson/?token=Ymka', json={"uid": uid,
                                                                          "name": "string",
                                                                          "file": file_id})
         if request_lesson.status_code != 200:
@@ -139,7 +164,7 @@ class CustomWindow(tk.Tk):
         lesson_id = dict(eval(request_lesson.content))
         lesson_id = int(lesson_id['id'])
 
-        result = post(url='http://127.0.0.1:8000/analyz/', json={"lid": lesson_id,
+        result = post(url='http://127.0.0.1:8000/analyz/?token=Ymka', json={"lid": lesson_id,
                                                                  "audio": "Start",
                                                                  "video": "Start"})
 
@@ -152,29 +177,74 @@ class CustomWindow(tk.Tk):
         return analyz_id, lesson_id
 
     def reload_user(self):
-        config_data = read_data_config()
+        config_data = setting.read_data_config()
         try:
             user_id = config_data.getint("user", "uid")
-        except:
+        except Exception:
             user_id = None
         try:
             return user_id
-        except:
+        except Exception:
             return user_id
 
+    def schedules(self):
+        while self.schedule_state:
+            schedule.run_pending()
+
     def start(self):
-        self.recog.change_state(state=False)
+        self.cv.change_state(state=True)
+        self.nlp.change_state(state=True)
+
         self.start_button.config(state=tk.DISABLED)
-        Thread(name="start_recog", target=self.recog.main).start()
+        self.timer = time.time()
+        Thread(name="recog_cv", target=self.cv.get_image, daemon=True).start()
+        Thread(name="recog_nlp", target=self.nlp.main).start()
+        schedule.every(30).seconds.do(self.analyz)
+        Thread(name='schedule', target=self.schedules).start()
 
     def stop(self):
-        self.recog.change_state(state=True)
-        self.start_button.config(state=tk.ACTIVE)
+        self.cv.change_state(state=False)
+        self.nlp.change_state(state=False)
+
+        # self.start_button.config(state=tk.ACTIVE)
+        schedule.cancel_job(schedule.get_jobs()[-1])
+        self.schedule_state = False
+
+        # TODO
+        # Нужно сделать так, чтобы при нажатии на закрыть, приложение открывало главное меню
+        # Тут, при нажатии на стоп, все данные, которые необходимо, переходили в таблицу Урока
 
     def close(self):
         self.destroy()
         # subprocess.Popen(['python', 'app.py'])
         sys.exit()
+
+    def analyz(self):
+        cv_data = self.cv.get_data()
+        nlp_data = self.nlp.get_data()
+
+        if cv_data == '':
+            cv_data = f'{self.__timer()} \n FaceNotFound'
+        else:
+            cv_data = f'{self.__timer()} \n {cv_data}'
+
+        if nlp_data == '':
+            nlp_data = f'{self.__timer()} \n AudioNotFound'
+        else:
+            nlp_data = f'{self.__timer()} \n {nlp_data}'
+
+        upload = requests.patch(url=f'{setting.url}analyz/?token=Ymka',
+                                json={'id': self.id, 'lid': self.lid, "audio": nlp_data, "video": cv_data})
+
+        mark = requests.get(url=f'{setting.url}analyz/mark?id={str(self.id)}&token=Ymka')
+        mark = eval(mark.text)
+        mark = mark['result']
+        if mark != "No":
+            self.mark = mark
+        # self.mark = randint(50, 100)
+        mark = requests.get(url=f'{setting.url}analyz/statistic?id={str(self.id)}&token=Ymka')
+        mark = mark.text
+        # self.statistic = mark
 
     def open_secondary_window(self, event):
         if not self.secondary_window:
@@ -207,13 +277,57 @@ class CustomWindow(tk.Tk):
             self.secondary_window.geometry(f"{secondary_width}x{secondary_height}+{secondary_x}+{secondary_y+60}")
             self.secondary_window.overrideredirect(True)
             # Добавление виджетов во второе окно
-            label = tk.Label(self.secondary_window, text=self.recog.mark_value(), font=("Arial", 16))
+            label = tk.Label(self.secondary_window, text=self.mark, font=("Arial", 16))
             label.pack(fill=tk.BOTH, expand=True)
 
     def close_secondary_window(self, event):
         if self.secondary_window:
             self.secondary_window.destroy()
             self.secondary_window = None
+
+    def open_long_window(self, event):
+        if not self.secondar_window:
+            # Получение размеров и позиции основного окна
+            main_x = self.winfo_x()
+            main_y = self.winfo_y()
+            main_width = self.winfo_width()
+            main_height = self.winfo_height()
+
+            # Получение размеров экрана
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+
+            # Размеры второго окна
+            secondary_width = 750
+            secondary_height = 120
+
+            # Рассчитываем позицию второго окна
+            if main_x + main_width + secondary_width <= screen_width:
+                # Второе окно справа от основного окна
+                secondary_x = main_x + main_width
+                secondary_y = main_y
+            else:
+                # Второе окно слева от основного окна
+                secondary_x = main_x - secondary_width
+                secondary_y = main_y
+
+            # Создание второго окна
+            self.secondar_window = tk.Toplevel(self.master)
+            self.secondar_window.geometry(f"{secondary_width}x{secondary_height}+{secondary_x}+{secondary_y+95}")
+            self.secondar_window.overrideredirect(True)
+            y = 0
+            # Добавление виджетов во второе окно
+            for i in self.statistic.split("\n"):
+                if self.statistic.split("\n").index(i) % 2 == 0:
+                    tk.Label(self.secondar_window, text=i, font=("Arial", 16, 'bold')).place(x=0, y=y)
+                else:
+                    tk.Label(self.secondar_window, text=i, font=("Arial", 10)).place(x=0, y=y)
+                y += 30
+
+    def close_long_window(self, event):
+        if self.secondar_window:
+            self.secondar_window.destroy()
+            self.secondar_window = None
 
     def update_secondary_window_position(self, event):
         if self.secondary_window:
@@ -288,9 +402,10 @@ if __name__ == "__main__":
     gui = Thread(target=load, args=(stop_event,))
     gui.start()
 
-    from CV.main import Recoginze
+    from CV.main import CV
+    from NLP.main import NLP
     stop_event.set()
     gui.join()
 
-    app = CustomWindow(recog=Recoginze())
+    app = CustomWindow(cv=CV(), nlp=NLP(state=True))
     app.mainloop()
